@@ -6,14 +6,30 @@ import authService from './authService';
 export const getAllPayrolls = async () => {
     try {
         const response = await api.get('/api/payroll/all');
+        console.log('Raw API Response:', response.data); // Debug log
+
+        if (response.data && response.data.success) {
+            const payrolls = response.data.data.map(payroll => ({
+                ...payroll,
+                employee_email: payroll.employee_email, // Ensure email is preserved
+                employee_name: payroll.employee_name
+            }));
+
+            return {
+                success: true,
+                data: payrolls
+            };
+        }
         return {
-            success: true,
-            data: response.data.data
+            success: false,
+            data: [],
+            message: 'Invalid response format'
         };
     } catch (error) {
         console.error('Error fetching payrolls:', error);
         return {
             success: false,
+            data: [],
             message: error.response?.data?.message || 'Failed to fetch payroll data'
         };
     }
@@ -118,11 +134,29 @@ export const exportPayroll = async (employeeId) => {
 // Tạo bảng lương mới (kiểm tra quyền admin/kế toán)
 export const createPayroll = async (payrollData) => {
     try {
-        const response = await api.post('/api/payroll/create', payrollData);
-        return {
-            success: true,
-            data: response.data.payroll || response.data
+        // Get current user data
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        const userRole = userData.user?.role || userData.role;
+        
+        // Add user role to payload
+        const payload = {
+            ...payrollData,
+            user: {
+                role: userRole
+            }
         };
+
+        const response = await api.post('/api/payroll/create', payload);
+        
+        if (response.data && response.data.success) {
+            return {
+                success: true,
+                data: response.data.data,
+                message: response.data.message
+            };
+        } else {
+            throw new Error(response.data?.message || 'Failed to create payroll');
+        }
     } catch (error) {
         console.error('Error creating payroll:', error);
         return {
@@ -151,67 +185,34 @@ export const deletePayroll = async (payrollId) => {
 // Fix: Cập nhật đường dẫn API update từ up-/:id thành update/:id
 export const updatePayroll = async (payrollId, payrollData) => {
     try {
-        console.log(`Updating payroll #${payrollId} with data:`, payrollData);
+        console.log('Updating payroll with data:', payrollData);
         
-        // Cải thiện logging cho debugging
-        if (!payrollId) {
-            console.error('Error: No payroll ID provided');
-            return {
-                success: false,
-                message: 'Không có ID bảng lương để cập nhật'
-            };
-        }
+        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+        const userRole = userData.user?.role || userData.role;
         
-        // Kiểm tra quyền
-        const userRole = authService.getUserRole();
-        if (userRole !== 'Admin' && userRole !== 'Accountant') {
-            console.error('Error: User not authorized', {role: userRole});
-            return {
-                success: false,
-                message: 'Bạn không có quyền cập nhật bảng lương'
-            };
-        }
-
-        // Đảm bảo API endpoint đúng
-        // Lưu ý: Nếu đã có proxy trong package.json, bạn không cần baseURL đầy đủ
-        const url = `/api/payroll/update/${payrollId}`;
-        console.log('Request URL:', url);
-        
-        // Gửi request
-        const response = await api.put(url, payrollData);
-        console.log('API response:', response.data);
-        
-        return {
-            success: true,
-            data: response.data.payroll || response.data
+        const payload = {
+            ...payrollData,
+            user: {
+                role: userRole
+            }
         };
+
+        const response = await api.put(`/api/payroll/update/${payrollId}`, payload);
+        
+        if (response.data && response.data.success) {
+            return {
+                success: true,
+                data: response.data.data,
+                message: response.data.message
+            };
+        } else {
+            throw new Error(response.data?.message || 'Failed to update payroll');
+        }
     } catch (error) {
         console.error('Error updating payroll:', error);
-        
-        // Xử lý chi tiết từng loại lỗi
-        let errorMessage = 'Failed to update payroll';
-        
-        if (error.response) {
-            console.error('Response error details:', {
-                status: error.response.status,
-                statusText: error.response.statusText,
-                data: error.response.data
-            });
-            
-            // Lấy message lỗi từ API nếu có
-            errorMessage = error.response.data?.message || 
-                          `Server responded with error: ${error.response.status} ${error.response.statusText}`;
-        } else if (error.request) {
-            // Request đã gửi nhưng không nhận được response
-            errorMessage = 'Không thể kết nối đến máy chủ. Vui lòng kiểm tra kết nối mạng.';
-        } else {
-            // Lỗi khác
-            errorMessage = error.message || 'Đã xảy ra lỗi không xác định';
-        }
-        
         return {
             success: false,
-            message: errorMessage
+            message: error.response?.data?.message || 'Failed to update payroll'
         };
     }
 };

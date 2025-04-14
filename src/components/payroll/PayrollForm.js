@@ -146,8 +146,8 @@ const PayrollForm = ({ onSuccess, onCancel, payrollData }) => {
 
         try {
             setLoading(true);
-
-            // Prepare data
+    
+            // Prepare data with all required fields
             const payload = {
                 employee_id: formData.employee_id,
                 base_salary: parseFloat(formData.base_salary),
@@ -156,23 +156,27 @@ const PayrollForm = ({ onSuccess, onCancel, payrollData }) => {
                 social_insurance: Math.round(calculations.social_insurance),
                 health_insurance: Math.round(calculations.health_insurance),
                 unemployment_insurance: Math.round(calculations.unemployment_insurance),
-                personal_income_tax: Math.round(calculations.personal_income_tax), 
+                personal_income_tax: Math.round(calculations.personal_income_tax),
                 total_deductions: Math.round(calculations.total_deductions),
                 net_salary: Math.round(calculations.net_salary),
-                pay_period: formData.pay_period,
-                region: formData.region,
+                pay_period: formData.pay_period || 'Monthly',
+                region: formData.region || 'I',
                 status: payrollData ? payrollData.status : 'Completed'
             };
-
-            console.log(`${isEditMode ? 'Updating' : 'Creating'} payroll data:`, payload);
-
+    
+            // Add debugging
+            console.log('Submitting payroll data:', payload);
+    
             let response;
             if (isEditMode) {
                 response = await updatePayroll(payrollData.id, payload);
             } else {
                 response = await createPayroll(payload);
             }
-
+    
+            // Add more debugging
+            console.log('Server response:', response);
+    
             if (response.success) {
                 onSuccess(response.data);
             } else {

@@ -1,10 +1,10 @@
 import React from 'react';
-import { 
-  Document, 
-  Page, 
-  Text, 
-  View, 
-  StyleSheet, 
+import {
+  Document,
+  Page,
+  Text,
+  View,
+  StyleSheet,
   PDFViewer,
   Font,
   PDFDownloadLink
@@ -12,20 +12,20 @@ import {
 
 // Đăng ký font hỗ trợ tiếng Việt nếu cần
 Font.register({
-    family: 'Open Sans',
-    fonts: [
-      { src: 'https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-regular.ttf' },
-      { src: 'https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-600.ttf', fontWeight: 'semibold' },
-      { src: 'https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-700.ttf', fontWeight: 'bold' }
-    ]
-  });
+  family: 'Open Sans',
+  fonts: [
+    { src: 'https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-regular.ttf' },
+    { src: 'https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-600.ttf', fontWeight: 'semibold' },
+    { src: 'https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-700.ttf', fontWeight: 'bold' }
+  ]
+});
 
 // Định nghĩa stylesheet
 const styles = StyleSheet.create({
-    page: {
-        padding: 30,
-        fontFamily: 'Open Sans' 
-      },
+  page: {
+    padding: 30,
+    fontFamily: 'Open Sans'
+  },
   title: {
     fontSize: 18,
     textAlign: 'center',
@@ -108,16 +108,22 @@ const styles = StyleSheet.create({
 
 // Helper để format tiền tệ
 const formatCurrency = (amount) => {
-  return new Intl.NumberFormat('vi-VN').format(amount);
+  const numericAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return new Intl.NumberFormat('vi-VN').format(numericAmount || 0);
 };
 
+const calculateTotal = (base, allowances) => {
+  const baseNum = typeof base === 'string' ? parseFloat(base) : (base || 0);
+  const allowancesNum = typeof allowances === 'string' ? parseFloat(allowances) : (allowances || 0);
+  return baseNum + allowancesNum;
+};
 // Component chính cho phiếu lương
 const PayrollPDF = ({ payroll }) => (
   <Document>
     <Page size="A4" style={styles.page}>
       {/* Tiêu đề */}
       <Text style={styles.title}>PHIẾU LƯƠNG</Text>
-      
+
       {/* Thông tin nhân viên */}
       <View style={styles.section}>
         <View style={styles.row}>
@@ -130,18 +136,14 @@ const PayrollPDF = ({ payroll }) => (
         </View>
         <View style={styles.row}>
           <Text style={styles.label}>Email:</Text>
-          <Text style={styles.value}>{payroll.employee?.email || 'N/A'}</Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>Chức vụ:</Text>
-          <Text style={styles.value}>{payroll.employee?.position || 'N/A'}</Text>
+          <Text style={styles.value}>{payroll.email || 'N/A'}</Text>
         </View>
         <View style={styles.row}>
           <Text style={styles.label}>Kỳ lương:</Text>
           <Text style={styles.value}>
-            {payroll.pay_period === 'Monthly' ? 'Hàng tháng' : 
-             payroll.pay_period === 'Bi-Weekly' ? 'Hai tuần' : 
-             payroll.pay_period === 'Weekly' ? 'Hàng tuần' : payroll.pay_period}
+            {payroll.pay_period === 'Monthly' ? 'Hàng tháng' :
+              payroll.pay_period === 'Bi-Weekly' ? 'Hai tuần' :
+                payroll.pay_period === 'Weekly' ? 'Hàng tuần' : payroll.pay_period}
           </Text>
         </View>
         <View style={styles.row}>
@@ -149,12 +151,12 @@ const PayrollPDF = ({ payroll }) => (
           <Text style={styles.value}>{new Date().toLocaleDateString('vi-VN')}</Text>
         </View>
       </View>
-      
+
       {/* Chi tiết lương */}
       <Text style={styles.header}>CHI TIẾT LƯƠNG</Text>
-      
+
       {/* Bảng thu nhập */}
-      <Text style={[styles.label, { marginTop: 10 }]}>KHOẢN THU NHẬP:</Text>
+      <Text style={[styles.label, { marginTop: 2 }]}>KHOẢN THU NHẬP:</Text>
       <View style={styles.table}>
         <View style={[styles.tableRow, styles.tableHeader]}>
           <Text style={[styles.tableCell, styles.tableTitleCell]}>Mô tả</Text>
@@ -169,15 +171,15 @@ const PayrollPDF = ({ payroll }) => (
           <Text style={[styles.tableCell, styles.tableAmount]}>{formatCurrency(payroll.allowances || 0)}</Text>
         </View>
         <View style={styles.tableRow}>
-          <Text style={[styles.tableCell, styles.tableTitleCell, {fontWeight: 'bold'}]}>Tổng thu nhập</Text>
-          <Text style={[styles.tableCell, styles.tableAmount, {fontWeight: 'bold'}]}>
-            {formatCurrency((payroll.base_salary || 0) + (payroll.allowances || 0))}
+          <Text style={[styles.tableCell, styles.tableTitleCell, { fontWeight: 'bold' }]}>Tổng thu nhập</Text>
+          <Text style={[styles.tableCell, styles.tableAmount, { fontWeight: 'bold' }]}>
+            {formatCurrency(calculateTotal(payroll.base_salary, payroll.allowances))}
           </Text>
         </View>
       </View>
-      
+
       {/* Bảng khấu trừ */}
-      <Text style={[styles.label, { marginTop: 10 }]}>KHOẢN KHẤU TRỪ:</Text>
+      <Text style={[styles.label, { marginTop: 2 }]}>KHOẢN KHẤU TRỪ:</Text>
       <View style={styles.table}>
         <View style={[styles.tableRow, styles.tableHeader]}>
           <Text style={[styles.tableCell, styles.tableTitleCell]}>Mô tả</Text>
@@ -204,22 +206,21 @@ const PayrollPDF = ({ payroll }) => (
           <Text style={[styles.tableCell, styles.tableAmount]}>{formatCurrency(payroll.deductions || 0)}</Text>
         </View>
         <View style={styles.tableRow}>
-          <Text style={[styles.tableCell, styles.tableTitleCell, {fontWeight: 'bold'}]}>Tổng khấu trừ</Text>
-          <Text style={[styles.tableCell, styles.tableAmount, {fontWeight: 'bold'}]}>
+          <Text style={[styles.tableCell, styles.tableTitleCell, { fontWeight: 'bold' }]}>Tổng khấu trừ</Text>
+          <Text style={[styles.tableCell, styles.tableAmount, { fontWeight: 'bold' }]}>
             {formatCurrency(payroll.total_deductions || 0)}
           </Text>
         </View>
       </View>
-      
+
       {/* Lương thực nhận */}
       <View style={styles.totalRow}>
         <Text style={styles.totalLabel}>LƯƠNG THỰC NHẬN:</Text>
         <Text style={styles.totalValue}>{formatCurrency(payroll.net_salary || 0)} VND</Text>
       </View>
-      
+
       {/* Footer */}
       <Text style={styles.footer}>
-        Ghi chú: Phiếu lương này đã được tạo tự động từ hệ thống
       </Text>
     </Page>
   </Document>

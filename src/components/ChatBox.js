@@ -1,400 +1,450 @@
-import React, { useState, useEffect } from "react";
-import "../assets/styles/ChatBox.css";
-// filepath: c:\Users\Crims\Documents\Src code FE\hr_erp_fe\src\components\ChatBox.js
-import {
-  sendMessage,
-  getMessages,
-  getAllEmployees,
-  socket, // Import the socket directly
-} from "../services/chatService";
+
+import React, { useState, useEffect, useRef } from 'react';
+import { getAllEmployees, getMessages, sendMessage } from '../services/chatService';
+import authService from '../services/authService';
 
 const ChatBox = () => {
-  const [isSending, setIsSending] = useState(false);
-  const [socketConnected, setSocketConnected] = useState(false);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
-  const [newMessage, setNewMessage] = useState("");
+  const [newMessage, setNewMessage] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const [isOpen, setIsOpen] = useState(true); // Set default to true to keep chat open
+  const [isSending, setIsSending] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isOpen, setIsOpen] = useState(true);
+  const [unreadCounts, setUnreadCounts] = useState({});
+  const socketRef = useRef(null);
+  const messagesEndRef = useRef(null);
 
-  // Define fetchEmpData function inside the component scope
-  const fetchEmpData = async () => {
+  useEffect(() => {
+    // Kết nối WebSocket
+    initializeWebSocket();
+    // Lấy thông tin user hiện tại
+    const user = authService.getCurrentUser();
+    console.log('Current user:', user); // Debug log
+    setCurrentUser(user);
+    // Lấy danh sách nhân viên
+    fetchEmployees();
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+    };
+  }, []);
+
+  // Load chat history khi chọn người nhận
+  useEffect(() => {
+    if (selectedEmployee) {
+      loadChatHistory();
+      markAsRead(selectedEmployee.id);
+    } else {
+      setMessages([]);
+    }
+  }, [selectedEmployee]);
+
+  // Load danh sách nhân viên khi component mount
+  useEffect(() => {
+    const initializeChat = async () => {
+      const user = authService.getCurrentUser();
+      setCurrentUser(user);
+      await fetchEmployees();
+    };
+
+    initializeChat();
+  }, []);
+
+  const initializeWebSocket = () => {
     try {
+      socketRef.current = new WebSocket('ws://localhost:8080');
+
+      socketRef.current.onopen = () => {
+        setIsConnected(true);
+        setError(null);
+        console.log('WebSocket connected');
+
+        // Send join event with user data
+        const userData = JSON.parse(localStorage.getItem('user'));
+        const userId = userData?.id || userData?.user?.id;
+        if (userId) {
+          socketRef.current.send(JSON.stringify({
+            type: 'join',
+            userId: userId
+          }));
+        }
+      };
+
+      socketRef.current.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log('Received message:', data);
+
+        if (data.type === 'message') {
+          handleIncomingMessage(data);
+        }
+      };
+
+      socketRef.current.onclose = () => {
+        setIsConnected(false);
+        console.log('WebSocket disconnected');
+        // Attempt to reconnect after 5 seconds
+        setTimeout(initializeWebSocket, 5000);
+      };
+
+      socketRef.current.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setIsConnected(false);
+      };
+
+      return socketRef.current;
+    } catch (error) {
+      console.error('Error initializing WebSocket:', error);
+      setIsConnected(false);
+      return null;
+    }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      setLoading(true);
+      setError(null);
       const response = await getAllEmployees();
-      console.log("Employees response:", response);
 
-      if (response.success && Array.isArray(response.data)) {
-        // Process employees to handle missing data
-        const processedEmployees = response.data.map((emp) => ({
-          ...emp,
-          full_name: emp.full_name || emp.name || emp.email || "Unknown User",
-          position: emp.position || "No position",
-          id: emp.id || "unknown",
-        }));
+      if (response.success) {
+        // Get current user ID
+        const currentUser = JSON.parse(localStorage.getItem('user'));
+        const currentUserId = currentUser?.id || currentUser?.user?.id;
 
-        setEmployees(processedEmployees);
-        console.log("Processed employees:", processedEmployees);
+        // Filter out current user and process the employee list
+        const filteredEmployees = response.data
+          .filter(emp => {
+            // Remove current user and ensure employee has valid data
+            return emp && emp.id && emp.id !== currentUserId;
+          })
+          .map(emp => ({
+            id: emp.id.toString(),
+            full_name: emp.full_name || 'Unknown User',
+            position: emp.position || 'No position'
+          }));
+
+        console.log('Filtered employees:', filteredEmployees);
+        setEmployees(filteredEmployees);
       } else {
-        console.error("Employees data is not an array:", response);
-        setEmployees([]);
+        setError('Không thể tải danh sách nhân viên');
       }
     } catch (error) {
-      console.error("Error fetching employees:", error);
-      setEmployees([]);
+      setError('Lỗi khi tải danh sách nhân viên');
+      console.error('Error fetching employees:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Fetch lịch sử tin nhắn
-  const loadChatHistory = async (user1Id, user2Id) => {
-    try {
-      console.log(`Loading chat history between ${user1Id} and ${user2Id}`);
-      const response = await getMessages(user1Id, user2Id);
-      if (response.success && Array.isArray(response.data)) {
-        console.log("Chat history loaded:", response.data.length, "messages");
-        setMessages(response.data);
-      } else {
-        console.error("Messages data is not an array:", response);
-        setMessages([]); // Đảm bảo messages luôn là array
-      }
-    } catch (error) {
-      console.error("Error loading chat history:", error);
-      setMessages([]); // Đảm bảo messages luôn là array khi có lỗi
-    }
-  };
+  const handleSendMessage = () => {
+    // Lấy lại thông tin user hiện tại từ localStorage
+    const userData = JSON.parse(localStorage.getItem('user'));
+    const currentUserId = userData?.id || userData?.user?.id;
 
-  // Gửi tin nhắn
-  const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedEmployee || !currentUser) {
+    if (!newMessage.trim() || !selectedEmployee || !currentUserId) {
       console.warn("Cannot send message - missing data:", {
-        hasMessage: !!newMessage.trim(),
-        hasEmployee: !!selectedEmployee,
-        hasCurrentUser: !!currentUser,
+        message: newMessage,
+        selectedEmployee,
+        currentUserId,
       });
       return;
     }
 
-    setIsSending(true);
-    console.log("Sending message to:", selectedEmployee.id);
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      console.error("WebSocket is not connected");
+      return;
+    }
 
     const messageData = {
-      sender_id: currentUser,
+      type: 'message',
+      sender_id: currentUserId, // Sử dụng ID từ localStorage thay vì currentUser.id
       receiver_id: selectedEmployee.id,
       message: newMessage.trim(),
+      created_at: new Date().toISOString()
     };
 
-    // Hiển thị tin nhắn ngay lập tức ở phía người gửi
-    const tempMessage = {
-      ...messageData,
-      id: "temp-" + Date.now(),
-      timestamp: new Date().toISOString(),
-    };
-
-    // Update UI immediately
-    setMessages((prev) => {
-      const newMessages = Array.isArray(prev)
-        ? [...prev, tempMessage]
-        : [tempMessage];
-      return newMessages;
-    });
-    setNewMessage("");
-
-    // Send the message via service
     try {
-      // Make sure socket is connected before sending
-      if (!socket.connected) {
-        console.log("Socket not connected, attempting to connect...");
-        socket.connect();
-
-        // Wait a bit for connection
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
-      const response = await sendMessage(messageData);
-      console.log("Message send response:", response);
-
-      if (!response.success) {
-        console.error("Error sending message:", response.message);
-        // You might want to show an error to the user here
-      }
+      console.log('Sending message:', messageData); // Debug log
+      socketRef.current.send(JSON.stringify(messageData));
+      setMessages(prev => [...prev, messageData]);
+      setNewMessage('');
     } catch (error) {
-      console.error("Failed to send message:", error);
-      // Handle errors, maybe show a notification to the user
-    } finally {
-      setIsSending(false);
+      console.error('Error sending message:', error);
+      setError('Failed to send message');
     }
   };
 
-  // Get employees on component mount
-  useEffect(() => {
-    fetchEmpData();
-  }, []);
+  const filteredEmployees = employees.filter(emp =>
+    emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    emp.position.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  // useEffect: Load chat history when employee is selected
-  useEffect(() => {
-    if (selectedEmployee && currentUser) {
-      console.log(
-        `Selected employee changed, loading chat with: ${selectedEmployee.id}`
-      );
-      loadChatHistory(currentUser, selectedEmployee.id);
-    }
-  }, [selectedEmployee, currentUser]);
-
-  // useEffect: Initialize socket and listen for events
-  useEffect(() => {
-    console.log("ChatBox component mounted - initializing socket");
-
-    // Parse user data from localStorage
-    const userData = JSON.parse(localStorage.getItem("user") || "{}");
-    const userId = userData.user?.id || userData.id;
-    const userName = userData.user?.full_name || userData.full_name;
-    setCurrentUser(userId);
-
-    if (!userId) {
-      console.error("No user ID found in localStorage");
-      return; // Exit early if no user ID
+  const loadChatHistory = async () => {
+    if (!selectedEmployee) {
+      console.warn('No employee selected');
+      return;
     }
 
-    // Define event handlers
-    const handleConnect = () => {
-      console.log("Socket connected in ChatBox component", socket.id);
-      setSocketConnected(true);
+    try {
+      setLoading(true);
+      setError(null);
 
-      // Send join event on connection with user data
-      socket.emit("join", { id: userId, name: userName });
-      console.log("Join event emitted for user:", userId);
-    };
+      const userData = JSON.parse(localStorage.getItem('user'));
+      const currentUserId = userData?.id || userData?.user?.id;
 
-    const handleDisconnect = () => {
-      console.log("Socket disconnected");
-      setSocketConnected(false);
-    };
+      const response = await getMessages(currentUserId, selectedEmployee.id);
 
-    const handleConnectError = (error) => {
-      console.error("Socket connection error:", error);
-      setSocketConnected(false);
-    };
+      console.log('Response data in loadChatHistory:', response.data); // Debug log
 
-    // Message handlers
-    const handleReceiveMessage = (message) => {
-      console.log("New message received:", message);
-      setMessages((prev) => {
-        if (!Array.isArray(prev)) return [message];
-        return [...prev, message];
-      });
-    };
+      // Adjust based on the actual structure of response.data
+      const messagesArray = Array.isArray(response.data)
+        ? response.data
+        : response.data?.messages || response.data?.data;
 
-    const handleUserList = (users) => {
-      console.log("Online users updated:", users);
-      setEmployees((prevEmployees) => {
-        if (!Array.isArray(prevEmployees)) return [];
-        return prevEmployees.map((employee) => ({
-          ...employee,
-          isOnline:
-            Array.isArray(users) &&
-            users.some((user) => user.id === employee.id),
+      if (messagesArray && Array.isArray(messagesArray)) {
+        const processedMessages = messagesArray.map(msg => ({
+          type: 'message',
+          id: msg.id,
+          sender_id: msg.sender_id,
+          receiver_id: msg.receiver_id,
+          message: msg.message,
+          created_at: msg.created_at,
+          isCurrentUser: msg.sender_id === currentUserId
         }));
-      });
-    };
 
-    // Register all event listeners
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
-    socket.on("connect_error", handleConnectError);
-    socket.on("receiveMessage", handleReceiveMessage);
-    socket.on("userList", handleUserList);
-
-    // If socket is already connected, manually trigger connect handler
-    if (socket.connected) {
-      handleConnect();
-    } else {
-      // Try to connect if not already connected
-      console.log("Socket not connected, attempting to connect...");
-      socket.connect();
+        setMessages(processedMessages);
+        scrollToBottom();
+      } else {
+        console.error('Failed to load chat history: Invalid data format');
+        setError('Invalid data format');
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+      setError('Error loading chat history');
+      setMessages([]);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // Cleanup function
-    return () => {
-      console.log("ChatBox component unmounting, cleaning up socket listeners");
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("connect_error", handleConnectError);
-      socket.off("receiveMessage", handleReceiveMessage);
-      socket.off("userList", handleUserList);
+  const handleIncomingMessage = (data) => {
+    if (data.type === 'message') {
+      if (selectedEmployee?.id === data.sender_id) {
+        // Nếu đang chat với người gửi, thêm tin nhắn vào chat
+        setMessages(prev => [...prev, data]);
+        scrollToBottom();
+      } else {
+        // Nếu không phải người đang chat, tăng số tin nhắn chưa đọc
+        setUnreadCounts(prev => ({
+          ...prev,
+          [data.sender_id]: (prev[data.sender_id] || 0) + 1
+        }));
+      }
+    }
+  };
 
-      // Don't disconnect socket here, as it may be used elsewhere
-    };
-  }, []);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const markAsRead = (employeeId) => {
+    setUnreadCounts(prev => ({
+      ...prev,
+      [employeeId]: 0
+    }));
+  };
+
+  const getTotalUnreadCount = () => {
+    return Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+  };
+
+  const toggleChat = () => {
+    setIsOpen(!isOpen);
+  };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: "20px",
-        right: "20px",
-        width: "700px",
-        boxShadow: "0 0 10px rgba(0,0,0,0.2)",
-        borderRadius: "8px",
-        overflow: "hidden",
-        zIndex: 1000,
-        background: "white",
-      }}>
-      <div
-        style={{
-          background: "#007bff",
-          color: "white",
-          padding: "10px 15px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          cursor: "pointer",
-        }}
-        onClick={() => setIsOpen(!isOpen)}>
-        <span>
-          Chat{" "}
-          {selectedEmployee
-            ? `- ${selectedEmployee.full_name || "Unknown"}`
-            : ""}
-        </span>
-        {!socketConnected && (
-          <span style={{ color: "yellow", marginLeft: "10px" }}>
-            ⚠️ Disconnected
-          </span>
-        )}
-        <span>{isOpen ? "▼" : "▲"}</span>
+    <div className={`fixed bottom-4 right-4 ${isOpen ? 'h-[600px]' : 'h-[48px]'} 
+      w-[400px] bg-white rounded-lg shadow-lg flex flex-col transition-all duration-300 ease-in-out
+      border-2 border-purple-500`}>    
+      {/* Header với nút đóng/mở */}
+      <div className="p-4 border-b border-purple-200 flex justify-between items-center bg-purple-50 relative">
+        <div className="flex items-center">
+          <div className="relative">
+            <h3 className="text-lg font-semibold text-purple-700">Chat</h3>
+            {getTotalUnreadCount() > 0 && (
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs 
+          rounded-full w-5 h-5 flex items-center justify-center">
+                {getTotalUnreadCount()}
+              </span>
+            )}
+          </div>
+          <div className="text-sm text-purple-500 ml-2">
+            {isConnected ? 'Connected' : 'Connecting...'}
+          </div>
+        </div>
+        <div className="flex items-center space-x-2">
+          {error && <div className="text-red-500 text-sm mr-2">{error}</div>}
+          <button
+            onClick={toggleChat}
+            className="p-1 hover:bg-purple-100 rounded-full transition-colors duration-150"
+          >
+            <svg
+              className={`w-6 h-6 text-purple-600 transform transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d={isOpen ? "M19 9l-7 7-7-7" : "M5 15l7-7 7 7"}
+              />
+            </svg>
+          </button>
+        </div>
       </div>
 
+      {/* Chat content - chỉ hiển thị khi isOpen = true */}
       {isOpen && (
-        <div
-          style={{
-            display: "flex",
-            height: "400px",
-            borderTop: "1px solid #eee",
-          }}>
-          <div
-            className="employee-list"
-            style={{
-              width: "30%",
-              borderRight: "1px solid #ccc",
-              overflowY: "auto",
-            }}>
-            <h4>Nhân viên</h4>
-            <ul style={{ listStyle: "none", padding: 0 }}>
-              {Array.isArray(employees) && employees.length > 0 ? (
-                employees.map((employee) => (
-                  <li
-                    key={employee.id}
-                    onClick={() => setSelectedEmployee(employee)}
-                    style={{
-                      padding: "8px",
-                      borderBottom: "1px solid #eee",
-                      background:
-                        selectedEmployee?.id === employee.id
-                          ? "#e6f7ff"
-                          : "transparent",
-                      cursor: "pointer",
-                    }}>
-                    {employee.full_name || "Unknown"} -{" "}
-                    {employee.position || "No position"}
-                    <span
-                      style={{
-                        display: "inline-block",
-                        width: "10px",
-                        height: "10px",
-                        borderRadius: "50%",
-                        background: employee.isOnline ? "green" : "gray",
-                        marginLeft: "5px",
-                      }}></span>
-                  </li>
+        <div className="flex flex-1 overflow-hidden">
+          {/* Employee List Section */}
+          <div className="w-[150px] border-r border-purple-100 flex flex-col">
+            {/* Search Bar */}
+            <div className="p-2 border-b border-purple-100">
+              <input
+                type="text"
+                placeholder="Search employees..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full p-2 text-sm border rounded-lg focus:outline-none focus:border-purple-500"
+              />
+            </div>
+
+            {/* Rest of the employee list code remains the same, just update some colors */}
+            <div className="flex-1 overflow-y-auto">
+              {loading ? (
+                <div className="p-4 text-center text-gray-500">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-500 mx-auto"></div>
+                </div>
+              ) : filteredEmployees.length > 0 ? (
+                filteredEmployees.map(emp => (
+                  <div
+                    key={emp.id}
+                    onClick={() => setSelectedEmployee(emp)}
+                    className={`p-2 cursor-pointer hover:bg-purple-50 transition-colors duration-150 relative
+                      ${selectedEmployee?.id === emp.id ? 'bg-purple-100 border-l-4 border-purple-500' : ''}`}
+                  >
+                    <div className="font-medium text-sm truncate">
+                      {emp.full_name}
+                      {unreadCounts[emp.id] > 0 && (
+                        <span className="absolute right-2 top-2 bg-red-500 text-white text-xs 
+                          rounded-full w-5 h-5 flex items-center justify-center">
+                          {unreadCounts[emp.id]}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {emp.position}
+                    </div>
+                  </div>
                 ))
               ) : (
-                <li style={{ padding: "8px" }}>Không có nhân viên</li>
+                <div className="p-4 text-center text-gray-500 text-sm">
+                  No employees found
+                </div>
               )}
-            </ul>
+            </div>
           </div>
 
-          {selectedEmployee && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                width: "70%",
-                height: "100%",
-              }}>
-              <div
-                style={{
-                  flex: 1,
-                  overflowY: "auto",
-                  padding: "10px",
-                  display: "flex",
-                  flexDirection: "column",
-                }}>
-                {Array.isArray(messages) && messages.length > 0 ? (
-                  messages.map((msg, index) => (
-                    <div
-                      key={index}
-                      style={{
-                        alignSelf:
-                          msg.sender_id === currentUser
-                            ? "flex-end"
-                            : "flex-start",
-                        background:
-                          msg.sender_id === currentUser ? "#dcf8c6" : "#f1f0f0",
-                        borderRadius: "8px",
-                        padding: "8px 12px",
-                        marginBottom: "8px",
-                        maxWidth: "70%",
-                      }}>
-                      {msg.message}
+          {/* Chat Area - update colors */}
+          <div className="flex-1 flex flex-col">
+            {selectedEmployee ? (
+              <>
+                <div className="p-3 border-b bg-purple-50">
+                  <div className="font-medium">{selectedEmployee.full_name}</div>
+                  <div className="text-xs text-gray-500">{selectedEmployee.position}</div>
+                </div>
+
+                {/* Messages Area */}
+                <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+                  {messages && messages.length > 0 ? (
+                    <div className="space-y-3">
+                      {messages.map((message, index) => {
+                        const isCurrentUser = message.sender_id === (currentUser?.id || currentUser?.user?.id);
+                        return (
+                          <div
+                            key={`${message.sender_id}-${message.created_at}-${index}`}
+                            className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                          >
+                            <div
+                              className={`max-w-[75%] rounded-lg px-3 py-2 shadow-sm
+                              ${isCurrentUser
+                                  ? 'bg-blue-500 text-white rounded-br-none'
+                                  : 'bg-white text-gray-800 rounded-bl-none'}`}
+                            >
+                              <p className="break-words text-sm">{message.message}</p>
+                              <span className="text-[10px] opacity-70 mt-1 block">
+                                {new Date(message.created_at).toLocaleTimeString()}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div ref={messagesEndRef} />
                     </div>
-                  ))
-                ) : (
-                  <div
-                    style={{
-                      textAlign: "center",
-                      color: "#999",
-                      marginTop: "20px",
-                    }}>
-                    Chưa có tin nhắn
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                      No messages yet
+                    </div>
+                  )}
+                </div>
+
+                {/* Message Input */}
+                <div className="p-3 border-t bg-white">
+                  <div className="flex space-x-2">
+                    <input
+                      type="text"
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                      placeholder="Type a message..."
+                      className="flex-1 p-2 text-sm border rounded-lg focus:outline-none focus:border-purple-500"
+                      disabled={!isConnected || !selectedEmployee}
+                    />
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!isConnected || !newMessage.trim() || isSending || !selectedEmployee}
+                      className="px-4 py-2 bg-purple-500 text-white text-sm rounded-lg disabled:opacity-50 
+                        hover:bg-purple-600 transition-colors duration-150"
+                    >
+                      {isSending ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      ) : (
+                        'Send'
+                      )}
+                    </button>
                   </div>
-                )}
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-gray-500">
+                <div className="text-center">
+                  <svg className="w-12 h-12 mx-auto text-purple-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  <p>Select an employee to start chatting</p>
+                </div>
               </div>
-              <div
-                style={{
-                  display: "flex",
-                  padding: "10px",
-                  borderTop: "1px solid #eee",
-                }}>
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-                  placeholder="Nhập tin nhắn..."
-                  style={{
-                    flex: 1,
-                    padding: "8px",
-                    borderRadius: "4px",
-                    border: "1px solid #ddd",
-                  }}
-                />
-                <button
-                  onClick={handleSendMessage}
-                  disabled={isSending}
-                  style={{
-                    marginLeft: "8px",
-                    padding: "8px 16px",
-                    background: "#007bff",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "4px",
-                    cursor: isSending ? "not-allowed" : "pointer",
-                  }}>
-                  {isSending ? "Đang gửi..." : "Gửi"}
-                </button>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -402,324 +452,3 @@ const ChatBox = () => {
 };
 
 export default ChatBox;
-
-//=====================PHP=====================
-
-// import React, { useState, useEffect, useRef } from 'react';
-// import { getAllEmployees, getMessages, sendMessage } from '../services/chatService';
-// import authService from '../services/authService';
-
-// const ChatBox = () => {
-//   const [error, setError] = useState(null);
-//   const [loading, setLoading] = useState(true);
-//   const [messages, setMessages] = useState([]);
-//   const [employees, setEmployees] = useState([]);
-//   const [selectedEmployee, setSelectedEmployee] = useState(null);
-//   const [newMessage, setNewMessage] = useState('');
-//   const [isConnected, setIsConnected] = useState(false);
-//   const [currentUser, setCurrentUser] = useState(null);
-//   const socketRef = useRef(null);
-//   const messagesEndRef = useRef(null);
-
-//   useEffect(() => {
-//     // Kết nối WebSocket
-//     initializeWebSocket();
-//     // Lấy thông tin user hiện tại
-//     const user = authService.getCurrentUser();
-//     setCurrentUser(user);
-//     // Lấy danh sách nhân viên
-//     fetchEmployees();
-
-//     return () => {
-//       if (socketRef.current) {
-//         socketRef.current.close();
-//       }
-//     };
-//   }, []);
-
-//   // Load chat history khi chọn người nhận
-//   useEffect(() => {
-//     if (selectedEmployee) {
-//       loadChatHistory();
-//     }
-//   }, [selectedEmployee]);
-
-//   // Load danh sách nhân viên khi component mount
-//   useEffect(() => {
-//     const initializeChat = async () => {
-//       const user = authService.getCurrentUser();
-//       setCurrentUser(user);
-//       await fetchEmployees();
-//     };
-
-//     initializeChat();
-//   }, []);
-
-//   const initializeWebSocket = () => {
-//     try {
-//       socketRef.current = new WebSocket('ws://localhost:8080');
-
-//       socketRef.current.onopen = () => {
-//         setIsConnected(true);
-//         setError(null); // Clear any previous errors
-//         console.log('WebSocket connected');
-//       };
-
-//       socketRef.current.onmessage = (event) => {
-//         try {
-//           const data = JSON.parse(event.data);
-//           handleIncomingMessage(data);
-//         } catch (error) {
-//           console.error('Error parsing message:', error);
-//           setError('Error receiving message');
-//         }
-//       };
-
-//       socketRef.current.onclose = () => {
-//         setIsConnected(false);
-//         setError('WebSocket disconnected');
-//         console.log('WebSocket disconnected');
-//         setTimeout(initializeWebSocket, 5000);
-//       };
-
-//       socketRef.current.onerror = (error) => {
-//         console.error('WebSocket error:', error);
-//         setIsConnected(false);
-//         setError('WebSocket connection error');
-//       };
-//     } catch (error) {
-//       console.error('Error initializing WebSocket:', error);
-//       setIsConnected(false);
-//       setError('Failed to initialize WebSocket');
-//     }
-//   };
-
-//   const fetchEmployees = async () => {
-//     try {
-//       setLoading(true);
-//       setError(null);
-//       const response = await getAllEmployees();
-
-//       if (response.success) {
-//         // Get current user ID
-//         const currentUser = JSON.parse(localStorage.getItem('user'));
-//         const currentUserId = currentUser?.id || currentUser?.user?.id;
-
-//         // Filter out current user and process the employee list
-//         const filteredEmployees = response.data
-//           .filter(emp => {
-//             // Remove current user and ensure employee has valid data
-//             return emp && emp.id && emp.id !== currentUserId;
-//           })
-//           .map(emp => ({
-//             id: emp.id.toString(),
-//             full_name: emp.full_name || 'Unknown User',
-//             position: emp.position || 'No position'
-//           }));
-
-//         console.log('Filtered employees:', filteredEmployees);
-//         setEmployees(filteredEmployees);
-//       } else {
-//         setError('Không thể tải danh sách nhân viên');
-//       }
-//     } catch (error) {
-//       setError('Lỗi khi tải danh sách nhân viên');
-//       console.error('Error fetching employees:', error);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   const handleSendMessage = async () => {
-//     if (!newMessage.trim() || !selectedEmployee) return;
-
-//     try {
-//       const currentUser = JSON.parse(localStorage.getItem('user'));
-//       const currentUserId = currentUser?.id || currentUser?.user?.id;
-
-//       if (!currentUserId) {
-//         setError('User not authenticated');
-//         return;
-//       }
-
-//       const messageData = {
-//         sender_id: currentUserId,
-//         receiver_id: selectedEmployee.id,
-//         message: newMessage.trim()
-//       };
-
-//       const response = await sendMessage(messageData);
-
-//       if (response.success) {
-//         setMessages(prev => [...prev, response.data.message]);
-//         setNewMessage('');
-//         scrollToBottom();
-//       } else {
-//         setError(response.message || 'Failed to send message');
-//       }
-//     } catch (error) {
-//       console.error('Error sending message:', error);
-//       setError('Message sending failed');
-//     }
-//   };
-
-//   const loadChatHistory = async () => {
-//     if (!selectedEmployee) return;
-
-//     try {
-//       setLoading(true);
-//       const currentUser = JSON.parse(localStorage.getItem('user'));
-//       const currentUserId = currentUser?.id || currentUser?.user?.id;
-
-//       if (!currentUserId) {
-//         setError('User not authenticated');
-//         return;
-//       }
-
-//       const response = await getMessages(currentUserId, selectedEmployee.id);
-
-//       if (response.success) {
-//         setMessages(response.data);
-//         scrollToBottom();
-//       } else {
-//         setError(response.message || 'Could not load chat history');
-//       }
-//     } catch (error) {
-//       console.error('Error loading chat history:', error);
-//       setError('Failed to load chat history');
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   const handleIncomingMessage = (data) => {
-//     if (data.type === 'message' &&
-//       (data.sender_id === selectedEmployee?.id ||
-//         data.receiver_id === selectedEmployee?.id)) {
-//       setMessages(prev => [...prev, data]);
-//       scrollToBottom();
-//     }
-//   };
-
-//   const scrollToBottom = () => {
-//     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-//   };
-
-//   return (
-//     <div className="fixed bottom-4 right-4 w-96 h-[500px] bg-white rounded-lg shadow-lg flex flex-col">
-//       <div className="p-4 border-b">
-//         <h3 className="text-lg font-semibold">Chat</h3>
-//         <div className="text-sm text-gray-500">
-//           {isConnected ? 'Connected' : 'Connecting...'}
-//         </div>
-//       </div>
-
-//       <div className="flex flex-1 overflow-hidden">
-//         {/* Danh sách nhân viên */}
-//         <div className="w-1/3 border-r overflow-y-auto">
-//           {loading ? (
-//             <div className="p-4 text-center text-gray-500">
-//               Loading...
-//             </div>
-//           ) : employees && employees.length > 0 ? (
-//             employees.map(emp => (
-//               <div
-//                 key={emp.id}
-//                 onClick={() => setSelectedEmployee(emp)}
-//                 className={`p-3 cursor-pointer hover:bg-gray-100 ${selectedEmployee?.id === emp.id ? 'bg-blue-50' : ''
-//                   }`}
-//               >
-//                 <div className="font-medium truncate">
-//                   {emp.full_name}
-//                 </div>
-//                 <div className="text-sm text-gray-500 truncate">
-//                   {emp.position}
-//                 </div>
-//               </div>
-//             ))
-//           ) : (
-//             <div className="p-4 text-center text-gray-500">
-//               No other employees found
-//             </div>
-//           )}
-//         </div>
-
-//         {/* Chat area */}
-//         <div className="flex-1 flex flex-col">
-//           {selectedEmployee ? (
-//             <>
-//               {/* Header */}
-//               <div className="p-3 border-b">
-//                 <div className="font-medium">{selectedEmployee.full_name}</div>
-//                 <div className="text-sm text-gray-500">{selectedEmployee.position}</div>
-//               </div>
-
-//               {/* Messages */}
-//               <div className="flex-1 overflow-y-auto p-4">
-//                 {messages && messages.length > 0 ? (
-//                   <div className="space-y-4">
-//                     {messages.map((message, index) => {
-//                       const currentUser = JSON.parse(localStorage.getItem('user'));
-//                       const currentUserId = currentUser?.id || currentUser?.user?.id;
-//                       const isCurrentUser = message.sender_id === currentUserId;
-
-//                       return (
-//                         <div
-//                           key={message.id || index}
-//                           className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
-//                         >
-//                           <div
-//                             className={`max-w-[70%] rounded-lg px-4 py-2 ${isCurrentUser
-//                               ? 'bg-blue-500 text-white'
-//                               : 'bg-gray-100 text-gray-800'
-//                               }`}
-//                           >
-//                             <p className="break-words">{message.message}</p>
-//                             <span className="text-xs opacity-70 mt-1 block">
-//                               {new Date(message.created_at).toLocaleTimeString()}
-//                             </span>
-//                           </div>
-//                         </div>
-//                       );
-//                     })}
-//                     <div ref={messagesEndRef} /> {/* For auto-scrolling */}
-//                   </div>
-//                 ) : (
-//                   <div className="flex items-center justify-center h-full text-gray-500">
-//                     No messages yet
-//                   </div>
-//                 )}
-//               </div>
-
-//               {/* Input */}
-//               <div className="p-3 border-t">
-//                 <div className="flex space-x-2">
-//                   <input
-//                     type="text"
-//                     value={newMessage}
-//                     onChange={(e) => setNewMessage(e.target.value)}
-//                     placeholder="Type a message..."
-//                     className="flex-1 p-2 border rounded-lg"
-//                   />
-//                   <button
-//                     onClick={handleSendMessage}
-//                     disabled={!isConnected || !newMessage.trim()}
-//                     className="px-4 py-2 bg-blue-500 text-white rounded-lg disabled:opacity-50"
-//                   >
-//                     Send
-//                   </button>
-//                 </div>
-//               </div>
-//             </>
-//           ) : (
-//             <div className="flex-1 flex items-center justify-center text-gray-500">
-//               Select an employee to start chatting
-//             </div>
-//           )}
-//         </div>
-//       </div>
-//     </div>
-//   );
-// };
-
-// export default ChatBox;
