@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { getAllEmployees, getMessages, sendMessage } from '../services/chatService';
+import { getAllEmployees, getMessages } from '../services/chatService';
 import authService from '../services/authService';
 
 const ChatBox = () => {
@@ -20,21 +20,34 @@ const ChatBox = () => {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
+
+    setUnreadCounts(loadUnreadCounts());
+    // Đóng/mở chat box
+    toggleChat();
     // Kết nối WebSocket
     initializeWebSocket();
     // Lấy thông tin user hiện tại
     const user = authService.getCurrentUser();
     console.log('Current user:', user); // Debug log
     setCurrentUser(user);
+
     // Lấy danh sách nhân viên
     fetchEmployees();
 
     return () => {
+      // Clean up WebSocket connection
       if (socketRef.current) {
-        socketRef.current.close();
+        socketRef.current.close(1000, 'Component unmounting');
+        socketRef.current = null;
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [messages]);
 
   // Load chat history khi chọn người nhận
   useEffect(() => {
@@ -58,51 +71,66 @@ const ChatBox = () => {
   }, []);
 
   const initializeWebSocket = () => {
-    try {
-      socketRef.current = new WebSocket('ws://localhost:8080');
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      return; // Already connected
+    }
 
-      socketRef.current.onopen = () => {
+    try {
+      const ws = new WebSocket('ws://localhost:8080');
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
         setIsConnected(true);
         setError(null);
-        console.log('WebSocket connected');
 
-        // Send join event with user data
+        // Send authentication message
         const userData = JSON.parse(localStorage.getItem('user'));
         const userId = userData?.id || userData?.user?.id;
         if (userId) {
-          socketRef.current.send(JSON.stringify({
+          ws.send(JSON.stringify({
             type: 'join',
-            userId: userId
+            userId: userId.toString() // Ensure userId is string
           }));
         }
       };
 
-      socketRef.current.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log('Received message:', data);
-
-        if (data.type === 'message') {
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('Received message:', data);
           handleIncomingMessage(data);
+        } catch (error) {
+          console.error('Error processing message:', error);
         }
       };
 
-      socketRef.current.onclose = () => {
+      ws.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code, event.reason);
         setIsConnected(false);
-        console.log('WebSocket disconnected');
-        // Attempt to reconnect after 5 seconds
-        setTimeout(initializeWebSocket, 5000);
+
+        // Only attempt to reconnect if not closed intentionally
+        if (event.code !== 1000) {
+          setTimeout(() => {
+            console.log('Attempting to reconnect...');
+            initializeWebSocket();
+          }, 3000);
+        }
       };
 
-      socketRef.current.onerror = (error) => {
+      ws.onerror = (error) => {
         console.error('WebSocket error:', error);
+        setError('Connection error');
         setIsConnected(false);
       };
 
-      return socketRef.current;
+      socketRef.current = ws;
     } catch (error) {
-      console.error('Error initializing WebSocket:', error);
+      console.error('Failed to create WebSocket:', error);
+      setError('Connection failed');
       setIsConnected(false);
-      return null;
+
+      // Attempt to reconnect after error
+      setTimeout(initializeWebSocket, 3000);
     }
   };
 
@@ -234,35 +262,86 @@ const ChatBox = () => {
     }
   };
 
+  const saveUnreadCounts = (counts) => {
+    localStorage.setItem('unreadChatCounts', JSON.stringify(counts));
+  };
+
+  const loadUnreadCounts = () => {
+    const saved = localStorage.getItem('unreadChatCounts');
+    return saved ? JSON.parse(saved) : {};
+  };
+
   const handleIncomingMessage = (data) => {
     if (data.type === 'message') {
-      if (selectedEmployee?.id === data.sender_id) {
-        // Nếu đang chat với người gửi, thêm tin nhắn vào chat
-        setMessages(prev => [...prev, data]);
-        scrollToBottom();
+      const userData = JSON.parse(localStorage.getItem('user'));
+      const currentUserId = (userData?.id || userData?.user?.id)?.toString();
+  
+      // Only process unread count if current user is the receiver
+      if (data.receiver_id === currentUserId) {
+        if (selectedEmployee?.id === data.sender_id) {
+          // If chatting with sender, add message and mark as read
+          setMessages(prev => [...prev, {
+            ...data,
+            isCurrentUser: false
+          }]);
+          setUnreadCounts(prev => ({
+            ...prev,
+            [data.sender_id]: 0
+          }));
+          scrollToBottom();
+        } else {
+          // If not chatting with sender, increment unread count
+          setUnreadCounts(prev => ({
+            ...prev,
+            [data.sender_id]: (prev[data.sender_id] || 0) + 1
+          }));
+        }
+        saveUnreadCounts(unreadCounts);
       } else {
-        // Nếu không phải người đang chat, tăng số tin nhắn chưa đọc
-        setUnreadCounts(prev => ({
-          ...prev,
-          [data.sender_id]: (prev[data.sender_id] || 0) + 1
-        }));
+        // If current user is sender, just add message to chat if relevant
+        if (selectedEmployee?.id === data.receiver_id) {
+          setMessages(prev => [...prev, {
+            ...data,
+            isCurrentUser: true
+          }]);
+          scrollToBottom();
+        }
       }
     }
   };
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "end"
+      });
+    }
   };
 
   const markAsRead = (employeeId) => {
-    setUnreadCounts(prev => ({
-      ...prev,
-      [employeeId]: 0
-    }));
+    setUnreadCounts(prev => {
+      const newCounts = {
+        ...prev,
+        [employeeId]: 0
+      };
+      saveUnreadCounts(newCounts); // Save to localStorage
+      return newCounts;
+    });
   };
 
   const getTotalUnreadCount = () => {
-    return Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
+    const userData = JSON.parse(localStorage.getItem('user'));
+    const currentUserId = (userData?.id || userData?.user?.id)?.toString();
+    
+    return Object.entries(unreadCounts).reduce((sum, [senderId, count]) => {
+      // Only count messages where current user is the receiver
+      const message = messages.find(m => m.sender_id === senderId);
+      if (message && message.receiver_id === currentUserId) {
+        return sum + (count || 0);
+      }
+      return sum;
+    }, 0);
   };
 
   const toggleChat = () => {
@@ -272,15 +351,16 @@ const ChatBox = () => {
   return (
     <div className={`fixed bottom-4 right-4 ${isOpen ? 'h-[600px]' : 'h-[48px]'} 
       w-[400px] bg-white rounded-lg shadow-lg flex flex-col transition-all duration-300 ease-in-out
-      border-2 border-purple-500`}>    
+      border-2 border-purple-500`}>
+
       {/* Header với nút đóng/mở */}
       <div className="p-4 border-b border-purple-200 flex justify-between items-center bg-purple-50 relative">
         <div className="flex items-center">
           <div className="relative">
             <h3 className="text-lg font-semibold text-purple-700">Chat</h3>
-            {getTotalUnreadCount() > 0 && (
+            {isOpen && getTotalUnreadCount() > 0 && (
               <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs 
-          rounded-full w-5 h-5 flex items-center justify-center">
+              rounded-full w-5 h-5 flex items-center justify-center">
                 {getTotalUnreadCount()}
               </span>
             )}
