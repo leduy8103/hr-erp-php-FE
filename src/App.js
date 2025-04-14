@@ -166,15 +166,7 @@ function App() {
             <Route
               path="/projects/*"
               element={
-                isAuthenticated() ? (
-                  projectAccess ? (
-                    <Project />
-                  ) : (
-                    <Forbiden message="You don't have access to project management." />
-                  )
-                ) : (
-                  <Navigate to="/login" />
-                )
+                isAuthenticated() ? <Project /> : <Navigate to="/login" />
               }
             />
             <Route
@@ -209,15 +201,15 @@ function App() {
             />
             <Route path="/reset-password" element={<ResetPasswordForm />} />
             <Route path="/employee/:id" element={<EmployeeProfile />} />
-            <Route 
-              path="/tasks/:taskId" 
+            <Route
+              path="/tasks/:taskId"
               element={
                 isAuthenticated() ? (
                   <TaskDetailPage />
                 ) : (
                   <Navigate to="/login" />
                 )
-              } 
+              }
             />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>

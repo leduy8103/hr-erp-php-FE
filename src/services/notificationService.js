@@ -5,10 +5,10 @@ const notificationService = {
   getNotifications: async () => {
     const token = authService.getToken();
     const userId = authService.getUserIdFromToken();
-    const response = await api.get(`/api/users/${userId}/notifications`, {
+    const response = await api.get(`/api/user/${userId}/notifications`, {
       headers: {
-        Authorization: `Bearer ${token}`
-      }
+        Authorization: `Bearer ${token}`,
+      },
     });
     return response.data;
   }
