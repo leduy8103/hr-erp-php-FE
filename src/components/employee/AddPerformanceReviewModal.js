@@ -44,6 +44,20 @@ const AddPerformanceReviewModal = ({ isOpen, onRequestClose, userId }) => { // N
   
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validate required fields
+    if (!formData.review_period || !formData.score) {
+      alert('Please fill in all required fields');
+      return;
+    }
+  
+    // Validate score range
+    const score = parseInt(formData.score);
+    if (isNaN(score) || score < 0 || score > 100) {
+      alert('Score must be between 0 and 100');
+      return;
+    }
+  
     try {
        console.log('Form Data before submission:', formData);
       // Xử lý giá trị rỗng trước khi gửi\
