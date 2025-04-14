@@ -28,7 +28,7 @@ const getAvatarColor = (name) => {
   return colors[index] || colors[0];
 };
 
-const PayrollItem = ({ payroll, onViewDetails, onDelete, onUpdate, isAdmin = false }) => {
+const PayrollItem = ({ payroll, onViewDetails, onDelete, onUpdate }) => {
   const getStatusClass = (status) => {
     switch (status) {
       case 'Completed':
@@ -76,7 +76,7 @@ const PayrollItem = ({ payroll, onViewDetails, onDelete, onUpdate, isAdmin = fal
               {payroll.employee?.full_name || `ID: ${payroll.employee_id}`}
             </p>
             <p className="text-xs text-gray-500">
-              {payroll.employee?.email || "N/A"}
+              {payroll.email || "N/A"}
             </p>
           </div>
         </div>
@@ -93,7 +93,7 @@ const PayrollItem = ({ payroll, onViewDetails, onDelete, onUpdate, isAdmin = fal
       </td>
       <td className="px-6 py-4">
         <div className="text-sm text-gray-900">
-          {payroll.deductions ? formatCurrency(payroll.deductions) : "-"}
+          {payroll.total_deductions ? formatCurrency(payroll.total_deductions) : "-"}
         </div>
       </td>
       <td className="px-6 py-4">
@@ -112,21 +112,17 @@ const PayrollItem = ({ payroll, onViewDetails, onDelete, onUpdate, isAdmin = fal
             Details
           </button>
 
-          {isAdmin && (
-            <>
-              <button
-                onClick={() => onUpdate(payroll)}
-                className="px-3 py-1 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors">
-                Edit
-              </button>
+          <button
+            onClick={() => onUpdate(payroll)}
+            className="px-3 py-1 text-sm font-medium text-white bg-green-600 rounded hover:bg-green-700 transition-colors">
+            Edit
+          </button>
 
-              <button
-                onClick={() => onDelete(payroll.id)}
-                className="px-3 py-1 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors">
-                Delete
-              </button>
-            </>
-          )}
+          <button
+            onClick={() => onDelete(payroll.id)}
+            className="px-3 py-1 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 transition-colors">
+            Delete
+          </button>
         </div>
       </td>
     </tr>
