@@ -23,7 +23,8 @@ const attendanceService = {
   getAttendanceHistory: async () => {
     try {
       const response = await api.get('/api/attendance/history');
-      return response.data;
+      // Return the data property from the response
+      return response.data.data;
     } catch (error) {
       console.error('Error fetching attendance history:', error);
       throw error;
@@ -37,11 +38,13 @@ const attendanceService = {
    */
   getAllUsersAttendance: async (date) => {
     try {
-      const endpoint = date 
-        ? `/api/attendance/user?date=${date}`
-        : '/api/attendance/user';
-        
-      const response = await api.get(endpoint);
+      // Create params object with the date
+      const params = {};
+      if (date) {
+        params.date = date;
+      }
+      
+      const response = await api.get('/api/attendance/user', { params });
       return response.data;
     } catch (error) {
       console.error('Error fetching all users attendance data:', error);
@@ -101,18 +104,33 @@ const attendanceService = {
   formatTime: (timeString) => {
     if (!timeString) return '';
     
-    if (timeString.includes('T')) {
-      const date = new Date(timeString);
+    try {
+      let date;
+      if (typeof timeString === 'string') {
+        if (timeString.includes('T')) {
+          // ISO format
+          date = new Date(timeString);
+        } else if (timeString.includes(' ')) {
+          // MySQL format (YYYY-MM-DD HH:MM:SS)
+          date = new Date(timeString);
+        } else {
+          // Other formats
+          date = new Date(timeString);
+        }
+      } else {
+        date = new Date(timeString);
+      }
+      
       let hours = date.getHours();
       const minutes = date.getMinutes().toString().padStart(2, '0');
       const ampm = hours >= 12 ? 'PM' : 'AM';
       hours = hours % 12;
       hours = hours ? hours : 12; // the hour '0' should be '12'
       return `${hours}:${minutes} ${ampm}`;
+    } catch (error) {
+      console.error('Error formatting time:', error);
+      return timeString;
     }
-    
-    // If it's already in HH:MM format, just return it
-    return timeString;
   },
 
   /**
@@ -164,9 +182,24 @@ const attendanceService = {
   getAttendanceStatus: (checkInTime) => {
     if (!checkInTime) return 'Absent';
     
-    // If it's an ISO string, convert to Date object
-    if (typeof checkInTime === 'string' && checkInTime.includes('T')) {
-      const date = new Date(checkInTime);
+    try {
+      // Handle different date formats
+      let date;
+      if (typeof checkInTime === 'string') {
+        if (checkInTime.includes('T')) {
+          // ISO format
+          date = new Date(checkInTime);
+        } else if (checkInTime.includes(' ')) {
+          // MySQL format (YYYY-MM-DD HH:MM:SS)
+          date = new Date(checkInTime);
+        } else {
+          // Other formats
+          date = new Date(checkInTime);
+        }
+      } else {
+        date = new Date(checkInTime);
+      }
+      
       const hours = date.getHours();
       const minutes = date.getMinutes();
       
@@ -175,9 +208,10 @@ const attendanceService = {
         return 'Late';
       }
       return 'On Time';
+    } catch (error) {
+      console.error('Error determining attendance status:', error);
+      return 'Present';
     }
-    
-    return 'Present';
   },
 
   /**

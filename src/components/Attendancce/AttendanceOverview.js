@@ -13,6 +13,7 @@ const AttendanceOverview = () => {
 
   useEffect(() => {
     fetchAttendanceData();
+
   }, [selectedDate]);
   
   const fetchAttendanceData = async () => {
@@ -22,7 +23,7 @@ const AttendanceOverview = () => {
     try {
       const response = await attendanceService.getAllUsersAttendance(selectedDate);
       
-      if (response && response.success) {
+      if (response && response.status === 'success') {
         console.log('Attendance data:', response);
         setAttendanceData(response.data || []);
       } else {
@@ -81,23 +82,28 @@ const AttendanceOverview = () => {
               <tbody>
                 {attendanceData.length > 0 ? (
                   attendanceData.map((user) => {
+                    // Get the latest attendance record for this user
+                    const latestRecord = user.attendance_records && user.attendance_records.length > 0 
+                      ? user.attendance_records[0] 
+                      : null;
+                    
                     // Determine status based on check-in time
-                    const status = user.attendance?.check_in_time 
-                      ? getAttendanceStatus(user.attendance.check_in_time)
+                    const status = latestRecord?.check_in_time 
+                      ? getAttendanceStatus(latestRecord.check_in_time)
                       : 'Absent';
                     
                     return (
-                      <tr key={user.id}>
+                      <tr key={user.user_id}>
                         <td>
                           <div className="employee-info">
-                            <span>{`${user.full_name}`}</span>
+                            <span>{user.user_name}</span>
                           </div>
                         </td>
                         <td>{user.position || 'N/A'}</td>
                         <td>{user.department || 'N/A'}</td>
-                        <td>{user.check_in_time ? formatTime(user.check_in_time) : 'Not checked in'}</td>
-                        <td>{user.check_out_time ? formatTime(user.check_out_time) : (user.check_in_time ? 'Working...' : 'N/A')}</td>
-                        <td>{user.attendance_status || 'N/A'}</td>
+                        <td>{latestRecord?.check_in_time ? formatTime(latestRecord.check_in_time) : 'Not checked in'}</td>
+                        <td>{latestRecord?.check_out_time ? formatTime(latestRecord.check_out_time) : (latestRecord?.check_in_time ? 'Working...' : 'N/A')}</td>
+                        <td>{status}</td>
                       </tr>
                     );
                   })

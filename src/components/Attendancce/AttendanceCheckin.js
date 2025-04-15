@@ -145,9 +145,9 @@ const AttendancePage = () => {
         processedHistory.push(todayRecord);
       }
 
-      if (historyResult.data && Array.isArray(historyResult.data)) {
-        const previousRecords = historyResult.data.map((record) => ({
-          day: record.date || record.created_at,
+      if (historyResult && historyResult.records && Array.isArray(historyResult.records)) {
+        const previousRecords = historyResult.records.map((record) => ({
+          day: record.date,
           checkInTime: record.check_in_time,
           checkOutTime: record.check_out_time,
           status: record.status || "Completed",
